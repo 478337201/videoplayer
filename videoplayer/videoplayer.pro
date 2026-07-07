@@ -4,7 +4,7 @@ QT += multimedia multimediawidgets
 
 CONFIG += c++17
 
-TARGET = VideoPlayer
+TARGET = videoplayer
 
 TEMPLATE = app
 
@@ -22,7 +22,7 @@ FORMS += \
     forms/videoplayermainwindow.ui
 
 TRANSLATIONS += \
-    mui/VideoPlayer_zh_CN.ts
+    mui/videoplayer_zh_CN.ts
 CONFIG += lrelease embed_translations
 
 # Default rules for deployment.
