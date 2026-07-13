@@ -1,25 +1,26 @@
-#pragma once
+﻿#pragma once
 
 #include <QMainWindow>
+#include <QMediaPlayer>
+#include <QString>
 
-class QMediaPlayer;
-class QAudioOutput;
 class QDragEnterEvent;
 class QDropEvent;
 class QDragLeaveEvent;
-
-namespace Ui
-{
-    class VideoPlayerMainWindow;
-}
+class QEvent;
+class QLabel;
+class QPushButton;
+class QVideoWidget;
+class QWidget;
+class VideoPlayerController;
 
 class VideoPlayerMainWindow : public QMainWindow
 {
     Q_OBJECT
 
 public:
-    explicit VideoPlayerMainWindow(QWidget* pParent = nullptr);
-    ~VideoPlayerMainWindow() override;
+    VideoPlayerMainWindow(QWidget* pParent, VideoPlayerController* pController);
+    ~VideoPlayerMainWindow() override = default;
 
 protected:
     void dragEnterEvent(QDragEnterEvent* pEvent) override;
@@ -29,18 +30,20 @@ protected:
 
 private slots:
     void onOpenFile();
-    void onPlayPause();
-    void onStopPlay();
-    void onPlaybackStateChanged();
-    void onExitFullScreen();
+    void onShowFileOpenedMessage(const QString& fileName, const QString& absolutePath);
+    void onPlaybackStateChanged(QMediaPlayer::PlaybackState state);
     void onToggleFullScreen();
 
 private:
-    void _openVideoFile(const QString& filePath);
+    void _initUI();
 
 private:
-    Ui::VideoPlayerMainWindow* m_pUi = nullptr;
-    QMediaPlayer* m_pPlayer = nullptr;
-    QAudioOutput* m_pAudioOutput = nullptr;
+    VideoPlayerController* m_pController = nullptr;
+    QVideoWidget* m_pVideoWidget = nullptr;
+    QWidget* m_pControlPanel = nullptr;
+    QPushButton* m_pBtnOpenFile = nullptr;
+    QPushButton* m_pBtnPlayPause = nullptr;
+    QPushButton* m_pBtnStopPlay = nullptr;
+    QLabel* m_pFilePathLabel = nullptr;
     bool m_isFullScreen = false;
 };

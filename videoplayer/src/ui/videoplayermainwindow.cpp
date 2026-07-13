@@ -1,80 +1,73 @@
-#include "videoplayermainwindow.h"
-#include "ui_videoplayermainwindow.h"
+﻿#include "videoplayermainwindow.h"
+#include "videoplayercontroller.h"
+#include "fileutil.h"
 
-#include <QMediaPlayer>
-#include <QAudioOutput>
-#include <QFileDialog>
+#include <QAction>
+#include <QDragEnterEvent>
+#include <QDragLeaveEvent>
 #include <QDropEvent>
+#include <QEvent>
+#include <QFileDialog>
+#include <QHBoxLayout>
+#include <QKeySequence>
+#include <QLabel>
 #include <QMimeData>
+#include <QMouseEvent>
+#include <QPushButton>
+#include <QStatusBar>
+#include <QStringList>
+#include <QUrl>
+#include <QVBoxLayout>
+#include <QVideoWidget>
 
 namespace
 {
-    bool isSupportedVideoFile(const QString& filePath)
-    {
-        static const QStringList supportedSuffixes = 
-        {
-            "mp4", "mkv", "avi", "mov", "wmv", "flv"
-        };
-        return supportedSuffixes.contains(QFileInfo(filePath).suffix().toLower());
-    }
-
     QString getFirstSupportedVideoPath(const QMimeData* pMimeData)
     {
         if (!pMimeData || !pMimeData->hasUrls())
-            return {};
+            return QString();
+
         for (const QUrl& url : pMimeData->urls())
         {
             if (!url.isLocalFile())
                 continue;
             const QString filePath = url.toLocalFile();
-            if (isSupportedVideoFile(filePath))
+            if (fileutils::isSupportedVideoFile(filePath))
                 return filePath;
         }
-        return {};
+        return QString();
     }
 }
 
-VideoPlayerMainWindow::VideoPlayerMainWindow(QWidget* pParent)
+VideoPlayerMainWindow::VideoPlayerMainWindow(QWidget* pParent, VideoPlayerController* pController)
     : QMainWindow(pParent)
-    , m_pUi(new Ui::VideoPlayerMainWindow)
-    , m_pPlayer(new QMediaPlayer(this))
-    , m_pAudioOutput(new QAudioOutput(this))
+    , m_pController(pController)
     , m_isFullScreen(false)
 {
-    m_pUi->setupUi(this);
-    m_pUi->videoWidget->installEventFilter(this);
-    m_pPlayer->setAudioOutput(m_pAudioOutput);
-    m_pPlayer->setVideoOutput(m_pUi->videoWidget);
+    if (!m_pController)
+        return;
 
-    connect(m_pUi->btnOpenFile, &QPushButton::clicked,
+    _initUI();
+
+    m_pVideoWidget->installEventFilter(this);
+    m_pController->setVideoOutput(m_pVideoWidget->videoSink());
+
+    connect(m_pBtnOpenFile, &QPushButton::clicked,
         this, &VideoPlayerMainWindow::onOpenFile);
-    connect(m_pUi->btnPlayPause, &QPushButton::clicked,
-        this, &VideoPlayerMainWindow::onPlayPause);
-    connect(m_pUi->btnStopPlay, &QPushButton::clicked,
-        this, &VideoPlayerMainWindow::onStopPlay); 
-    connect(m_pPlayer, &QMediaPlayer::playbackStateChanged,
+    connect(m_pBtnPlayPause, &QPushButton::clicked,
+        m_pController, &VideoPlayerController::playPause);
+    connect(m_pBtnStopPlay, &QPushButton::clicked,
+        m_pController, &VideoPlayerController::stopPlay);
+    connect(m_pController, &VideoPlayerController::showFileOpenedMessage,
+        this, &VideoPlayerMainWindow::onShowFileOpenedMessage);
+    connect(m_pController, &VideoPlayerController::playbackStateChanged,
         this, &VideoPlayerMainWindow::onPlaybackStateChanged);
 
     QAction* pPlayPauseAction = new QAction(this);
     pPlayPauseAction->setShortcut(QKeySequence(Qt::Key_Space));
     connect(pPlayPauseAction, &QAction::triggered,
-            this, &VideoPlayerMainWindow::onPlayPause);
+        m_pController, &VideoPlayerController::playPause);
     addAction(pPlayPauseAction);
-    QAction* pExitFullScreenAction = new QAction(this);
-    pExitFullScreenAction->setShortcut(QKeySequence(Qt::Key_Escape));
-    connect(pExitFullScreenAction, &QAction::triggered,
-        this, &VideoPlayerMainWindow::onExitFullScreen);
-    addAction(pExitFullScreenAction);
-    QAction* pToggleFullScreenAction = new QAction(this);
-    pToggleFullScreenAction->setShortcut(QKeySequence(Qt::Key_F));
-    connect(pToggleFullScreenAction, &QAction::triggered,
-        this, &VideoPlayerMainWindow::onToggleFullScreen);
-    addAction(pToggleFullScreenAction);
-}
-
-VideoPlayerMainWindow::~VideoPlayerMainWindow()
-{
-    delete m_pUi;
 }
 
 void VideoPlayerMainWindow::dragEnterEvent(QDragEnterEvent* pEvent)
@@ -97,7 +90,7 @@ void VideoPlayerMainWindow::dropEvent(QDropEvent* pEvent)
         return;
     }
 
-    _openVideoFile(filePath);
+    m_pController->openFile(filePath);
     pEvent->acceptProposedAction();
     setStyleSheet("");
 }
@@ -110,7 +103,7 @@ void VideoPlayerMainWindow::dragLeaveEvent(QDragLeaveEvent* pEvent)
 
 bool VideoPlayerMainWindow::eventFilter(QObject* pWatched, QEvent* pEvent)
 {
-    if (pWatched == m_pUi->videoWidget && pEvent->type() == QEvent::MouseButtonDblClick)
+    if (pWatched == m_pVideoWidget && pEvent->type() == QEvent::MouseButtonDblClick)
     {
         QMouseEvent* pMouseEvent = static_cast<QMouseEvent*>(pEvent);
         if (pMouseEvent->button() == Qt::LeftButton)
@@ -124,61 +117,47 @@ bool VideoPlayerMainWindow::eventFilter(QObject* pWatched, QEvent* pEvent)
 
 void VideoPlayerMainWindow::onOpenFile()
 {
-    const QString filePath = QFileDialog::getOpenFileName(this, tr("Open Video"), QString(),
-        tr("Video Files (*.mp4 *.mkv *.avi *.mov *.wmv *.flv);;All Files (*.*)"));
-    _openVideoFile(filePath);
+    QStringList patterns;
+    for (const QString& suffix : fileutils::supportedSuffixes)
+        patterns << QString("*.%1").arg(suffix);
+
+    const QString filePath = QFileDialog::getOpenFileName(this, tr("Open Video"),
+        QString(), tr("Video Files (%1);;All Files (*.*)").arg(patterns.join(" ")));
+    m_pController->openFile(filePath);
 }
 
-void VideoPlayerMainWindow::onPlayPause()
+void VideoPlayerMainWindow::onShowFileOpenedMessage(const QString& fileName, const QString& absolutePath)
 {
-    if (!m_pUi->btnPlayPause->isEnabled())
-        return;
-    
-    if (m_pPlayer->playbackState() == QMediaPlayer::PlayingState)
-        m_pPlayer->pause();
-    else
-        m_pPlayer->play();
+    m_pFilePathLabel->setToolTip(absolutePath);
+    m_pFilePathLabel->setText(tr("Current file: %1").arg(fileName));
+    m_pBtnPlayPause->setEnabled(true);
 }
 
-void VideoPlayerMainWindow::onStopPlay()
+void VideoPlayerMainWindow::onPlaybackStateChanged(QMediaPlayer::PlaybackState state)
 {
-    m_pPlayer->stop();
-}
-
-void VideoPlayerMainWindow::onPlaybackStateChanged()
-{
-    switch (m_pPlayer->playbackState())
+    switch (state)
     {
     case QMediaPlayer::PlayingState:
     {
-        m_pUi->btnStopPlay->setEnabled(true);
-        m_pUi->btnPlayPause->setText(tr("Pause"));
+        m_pBtnStopPlay->setEnabled(true);
+        m_pBtnPlayPause->setText(tr("Pause"));
     } break;
     case QMediaPlayer::PausedState:
-        m_pUi->btnPlayPause->setText(tr("Play"));
-        break;    
+        m_pBtnPlayPause->setText(tr("Play"));
+        break;
     case QMediaPlayer::StoppedState:
     {
-        m_pUi->btnStopPlay->setEnabled(false);
-        m_pUi->btnPlayPause->setText(tr("Play"));
+        m_pBtnStopPlay->setEnabled(false);
+        m_pBtnPlayPause->setText(tr("Play"));
     } break;
     }
-}
-
-void VideoPlayerMainWindow::onExitFullScreen()
-{
-    m_pUi->controlPanel->show();
-    setStyleSheet("");
-    showNormal();
-    statusBar()->show();
-    m_isFullScreen = false;
 }
 
 void VideoPlayerMainWindow::onToggleFullScreen()
 {
     if (m_isFullScreen)
     {
-        m_pUi->controlPanel->show();
+        m_pControlPanel->show();
         setStyleSheet("");
         showNormal();
         statusBar()->show();
@@ -186,7 +165,7 @@ void VideoPlayerMainWindow::onToggleFullScreen()
     }
     else
     {
-        m_pUi->controlPanel->hide();
+        m_pControlPanel->hide();
         setStyleSheet("QMainWindow { background-color: black; }");
         statusBar()->hide();
         showFullScreen();
@@ -194,15 +173,39 @@ void VideoPlayerMainWindow::onToggleFullScreen()
     }
 }
 
-void VideoPlayerMainWindow::_openVideoFile(const QString& filePath)
+void VideoPlayerMainWindow::_initUI()
 {
-    if (filePath.isEmpty() || !isSupportedVideoFile(filePath))
-        return;
+    resize(960, 600);
+    setWindowTitle(tr("VideoPlayerMainWindow"));
 
-    m_pPlayer->setSource(QUrl::fromLocalFile(filePath));
-    const QFileInfo fileInfo(filePath);
-    const QString displayText = fileInfo.absoluteFilePath();
-    m_pUi->filePathLabel->setToolTip(displayText);
-    m_pUi->filePathLabel->setText(tr("Current file: %1").arg(fileInfo.fileName()));
-    m_pUi->btnPlayPause->setEnabled(true);
+    QWidget* pCentral = new QWidget(this);
+    setCentralWidget(pCentral);
+
+    QVBoxLayout* pMainLayout = new QVBoxLayout(pCentral);
+    pMainLayout->setContentsMargins(0, 0, 0, 0);
+
+    m_pVideoWidget = new QVideoWidget(pCentral);
+    m_pVideoWidget->setAspectRatioMode(Qt::KeepAspectRatioByExpanding);
+    pMainLayout->addWidget(m_pVideoWidget);
+
+    m_pControlPanel = new QWidget(pCentral);
+    m_pControlPanel->setMaximumHeight(40);
+    QHBoxLayout* pControlLayout = new QHBoxLayout(m_pControlPanel);
+
+    m_pBtnOpenFile = new QPushButton(tr("Open File"), m_pControlPanel);
+    m_pBtnPlayPause = new QPushButton(tr("Play"), m_pControlPanel);
+    m_pBtnPlayPause->setEnabled(false);
+    m_pBtnStopPlay = new QPushButton(tr("Stop"), m_pControlPanel);
+    m_pBtnStopPlay->setEnabled(false);
+
+    pControlLayout->addWidget(m_pBtnOpenFile);
+    pControlLayout->addStretch();
+    pControlLayout->addWidget(m_pBtnPlayPause);
+    pControlLayout->addStretch();
+    pControlLayout->addWidget(m_pBtnStopPlay);
+
+    pMainLayout->addWidget(m_pControlPanel);
+
+    m_pFilePathLabel = new QLabel(statusBar());
+    statusBar()->addWidget(m_pFilePathLabel);
 }

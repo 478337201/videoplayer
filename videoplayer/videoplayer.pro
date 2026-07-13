@@ -9,17 +9,20 @@ TARGET = videoplayer
 TEMPLATE = app
 
 INCLUDEPATH += \
-    $$PWD/src/ui
+    $$PWD/src \
+    $$PWD/src/ui \
+    $$PWD/src/controller \
+    $$PWD/src/util
 
 SOURCES += \
     src/main.cpp \
+    src/controller/videoplayercontroller.cpp \
     src/ui/videoplayermainwindow.cpp
 
 HEADERS += \
-    src/ui/videoplayermainwindow.h
-
-FORMS += \
-    forms/videoplayermainwindow.ui
+    src/controller/videoplayercontroller.h \
+    src/ui/videoplayermainwindow.h \
+    src/util/fileutil.h
 
 TRANSLATIONS += \
     mui/zh_CN/videoplayer.ts
